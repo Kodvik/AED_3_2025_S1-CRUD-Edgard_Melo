@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>ModuloDeConsoleCRUD_AED3</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AED_3_2025_S1-CRUD-Edgard_Melo\AED_3_2025_S1-CRUD-Edgard_Melo.csproj" />
+  </ItemGroup>
+
+</Project>
