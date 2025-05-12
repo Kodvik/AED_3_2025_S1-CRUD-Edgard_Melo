@@ -1,55 +1,90 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel.Design;
-using System.Globalization; // Tive que adicionar por precisar para o csvhelper
 using System.IO;
-using CsvHelper;
-using Microsoft.Win32;
+using AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess;
+using AED_3_2025_S1_CRUD_Edgard_Melo.Models;
+using AED_3_2025_S1_CRUD_Edgard_Melo.Utilities;
 
-class Program
+namespace AED_3_2025_S1_CRUD_Edgard_Melo
 {
-    static void Main(string[] args)
+    class Program
     {
-        Console.WriteLine("Bem-vindo ao sistema CRUD!");
-        Console.WriteLine("Por favor, insira o caminho completo do arquivo CSV:");
-
-        // Solicita ao usuário o caminho do arquivo CSV
-        string caminhoCSV = Console.ReadLine();
-        string caminhoDeTrabalho = Path.GetDirectoryName(caminhoCSV);
-
-        // Valida se o caminho foi fornecido
-        if (string.IsNullOrWhiteSpace(caminhoCSV))
+        static void Main(string[] args)
         {
-            Console.WriteLine("Caminho inválido. Por favor, insira um caminho válido.");
-            return;
-        }
+            Console.WriteLine("Bem-vindo ao sistema CRUD!");
+            Console.WriteLine("Deseja importar dados de um arquivo CSV?");
+            Console.WriteLine("1 - Sim");
+            Console.WriteLine("2 - Não");
+            Console.Write("Escolha uma opção: ");
 
-        try
-        {
-            // Importa os registros do CSV usando CsvHelper
-            var registros = ImportarRegistrosDoCSV(caminhoCSV);
+            string caminhoCSV = string.Empty;
+            string opcaoInicial = Console.ReadLine();
+            string basePath = Directory.GetCurrentDirectory();
+            string dataPath = Path.Combine(basePath, "Data");
+            var crud = new CRUD<RegistroDeRede>(basePath, caminhoCSV);
 
-            Console.WriteLine($"Importação bem-sucedida! Foram carregados {registros.Count} registros.");
-
-            Console.WriteLine("Aguarde o processamento do banco de dados.");
-
-            // Inicializa o sistema CRUD e o arquivo binário
-            string caminhoArquivoBin = Path.Combine(caminhoDeTrabalho, "banco_de_dados.bin");
-            var crud = new CRUD<RegistroDeRede>(caminhoArquivoBin);
-
-            // Salva os registros importados no arquivo binário
-            foreach (var registro in registros)
+            if (opcaoInicial == "1")
             {
-                crud.Criar(registro);
+                Console.WriteLine("Por favor, insira o caminho completo do arquivo CSV:");
+                caminhoCSV = Console.ReadLine();
+                if (string.IsNullOrWhiteSpace(caminhoCSV) || !File.Exists(caminhoCSV))
+                {
+                    Console.WriteLine("Caminho inválido ou arquivo não encontrado. Continuando sem importar.");
+                }
+                else
+                {
+                    try
+                    {
+                        // Confirmar limpeza dos arquivos .bin
+                        Console.WriteLine("A importação excluirá todos os dados existentes (.bin). Deseja continuar? (S/N)");
+                        if (Console.ReadLine()?.ToUpper() != "S")
+                        {
+                            Console.WriteLine("Importação cancelada.");
+                            Console.WriteLine("Pressione qualquer tecla para continuar para o menu");
+                            Console.ReadKey();
+                            return;
+                        }
+
+                        // Limpar arquivos .bin
+                        LimparArquivosBin(dataPath);
+
+                        // Reinicializar CRUD após limpeza para recriar índices
+                        crud = new CRUD<RegistroDeRede>(basePath, caminhoCSV);
+
+                        var importer = new CSVImporter();
+                        var registros = importer.ImportarCSV(caminhoCSV);
+                        Console.WriteLine($"Importação bem-sucedida! Foram carregados {registros.Count} registros.");
+
+                        // Reinicializar ultimoId com base nos UIDs do CSV
+                        int maxUid = registros.Any() ? registros.Max(r => r.UID) : 0;
+                        crud.ReinicializarUltimoId(maxUid);
+                        Console.WriteLine($"ultimoId reinicializado para: {maxUid}");
+
+                        foreach (var registro in registros)
+                        {
+                            try
+                            {
+                                Console.WriteLine($"Criando registro (UID: {registro.UID})...");
+                                crud.Criar(registro);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Erro ao criar registro (UID: {registro.UID}): {ex.Message}");
+                            }
+                        }
+                        Console.WriteLine("Os registros foram salvos no banco de dados binário!");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Erro ao importar CSV: {ex.Message}");
+                    }
+                }
             }
 
-            Console.WriteLine("Os registros foram salvos no arquivo binário com sucesso!");
-            Console.WriteLine("Pressione qualquer botao para continuar para o menu");
-
-            Console.ReadLine();
+            Console.WriteLine("Pressione qualquer tecla para continuar para o menu");
+            Console.ReadKey();
 
             bool continuar = true;
-
             while (continuar)
             {
                 Console.Clear();
@@ -60,37 +95,50 @@ class Program
                 Console.WriteLine("3 - Atualizar");
                 Console.WriteLine("4 - Excluir");
                 Console.WriteLine("5 - Listar Todos os Registros");
+                Console.WriteLine("6 - Exportar para CSV");
                 Console.Write("Escolha a opção desejada: ");
 
                 string opcao = Console.ReadLine();
 
                 switch (opcao)
                 {
-                    case "1": // Criar
+                    case "1":
                         Console.Clear();
-                        RegistroDeRede novoRegistro = ObterRegistroDoUsuario();
-                        crud.Criar(novoRegistro);
-                        Console.WriteLine("Registro criado com sucesso!");
+                        var novoRegistro = InputHelper.ObterRegistroDoUsuario();
+                        try
+                        {
+                            crud.Criar(novoRegistro);
+                            Console.WriteLine("Registro criado com sucesso!");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Erro ao criar registro: {ex.Message}");
+                        }
+                        Console.WriteLine("Pressione qualquer tecla para continuar");
+                        Console.ReadKey();
                         break;
 
-                    case "2": // Ler
+                    case "2":
+                        Console.Clear();
                         Console.Write("Digite o ID do registro que deseja ler: ");
                         if (int.TryParse(Console.ReadLine(), out int idLer))
                         {
-                            var registro = crud.Ler(idLer);
-                            if (registro != null)
+                            try
                             {
-                                Console.Clear();
-                                Console.WriteLine("\nRegistro Encontrado:");
-                                Console.WriteLine($"User Information: {registro.UserInformation}");
-                                Console.WriteLine($"Time Stamp: {registro.Timestamp}");
-                                Console.WriteLine($"Source IP: {registro.SourceIPAddress}");
-                                Console.WriteLine($"Destination IP: {registro.DestinationIPAddress}");
-                                Console.WriteLine($"Payload Data:  {registro.PayloadData}");
+                                var registro = crud.Ler(idLer);
+                                if (registro != null)
+                                {
+                                    Console.WriteLine("\nRegistro Encontrado:");
+                                    ExibirRegistro(registro);
+                                }
+                                else
+                                {
+                                    Console.WriteLine("Registro não encontrado.");
+                                }
                             }
-                            else
+                            catch (Exception ex)
                             {
-                                Console.WriteLine("Registro não encontrado.");
+                                Console.WriteLine($"Erro ao ler registro: {ex.Message}");
                             }
                         }
                         else
@@ -98,45 +146,88 @@ class Program
                             Console.WriteLine("ID inválido.");
                         }
                         Console.WriteLine("Pressione qualquer tecla para continuar");
-                        Console.Read();
+                        Console.ReadKey();
                         break;
 
-                    case "3": // Atualizar
+                    case "3":
                         Console.Clear();
                         Console.Write("Digite o ID do registro que deseja atualizar: ");
                         if (int.TryParse(Console.ReadLine(), out int idAtualizar))
                         {
-                            RegistroDeRede registroAtualizado = ObterRegistroDoUsuario();
-                            crud.Atualizar(idAtualizar, registroAtualizado);
-                            Console.WriteLine("Registro atualizado com sucesso!");
+                            var registroAtualizado = InputHelper.ObterRegistroDoUsuario();
+                            try
+                            {
+                                crud.Atualizar(idAtualizar, registroAtualizado);
+                                Console.WriteLine("Registro atualizado com sucesso!");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Erro ao atualizar registro: {ex.Message}");
+                            }
                         }
                         else
                         {
                             Console.WriteLine("ID inválido.");
                         }
+                        Console.WriteLine("Pressione qualquer tecla para continuar");
+                        Console.ReadKey();
                         break;
 
-                    case "4": // Excluir
+                    case "4":
                         Console.Clear();
                         Console.Write("Digite o ID do registro que deseja excluir: ");
                         if (int.TryParse(Console.ReadLine(), out int idExcluir))
                         {
-                            crud.Deletar(idExcluir);
-                            Console.WriteLine("Registro excluído com sucesso!");
+                            try
+                            {
+                                crud.Deletar(idExcluir);
+                                Console.WriteLine("Registro excluído com sucesso!");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Erro ao excluir registro: {ex.Message}");
+                            }
                         }
                         else
                         {
                             Console.WriteLine("ID inválido.");
                         }
+                        Console.WriteLine("Pressione qualquer tecla para continuar");
+                        Console.ReadKey();
                         break;
 
-                    case "5": // Listar todos os registros
+                    case "5":
                         Console.Clear();
                         Console.WriteLine("\nLista de Registros:");
                         ListarRegistros(crud);
+                        Console.WriteLine("Pressione qualquer tecla para continuar");
+                        Console.ReadKey();
                         break;
 
-                    case "0": // Sair
+                    case "6":
+                        Console.Clear();
+                        Console.Write("Digite o caminho completo para o arquivo CSV de exportação: ");
+                        string caminhoExportacao = Console.ReadLine();
+                        if (string.IsNullOrWhiteSpace(caminhoExportacao))
+                        {
+                            Console.WriteLine("Caminho inválido. Exportação cancelada.");
+                        }
+                        else
+                        {
+                            try
+                            {
+                                crud.ExportarParaCSV(caminhoExportacao);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Erro ao exportar para CSV: {ex.Message}");
+                            }
+                        }
+                        Console.WriteLine("Pressione qualquer tecla para continuar");
+                        Console.ReadKey();
+                        break;
+
+                    case "0":
                         continuar = false;
                         Console.WriteLine("Saindo do sistema...");
                         break;
@@ -144,122 +235,107 @@ class Program
                     default:
                         Console.Clear();
                         Console.WriteLine("Opção inválida. Tente novamente.");
+                        Console.WriteLine("Pressione qualquer tecla para continuar");
+                        Console.ReadKey();
                         break;
                 }
             }
         }
 
-        catch (Exception ex)
+        private static void LimparArquivosBin(string dataPath)
         {
-            // Lida com qualquer exceção durante o processo
-            Console.WriteLine($"Erro ao processar o arquivo CSV: {ex.Message}");
-        }
-    }
+            string[] arquivosBin = {
+                Path.Combine(dataPath, "indices_bplus.bin"),
+                Path.Combine(dataPath, "banco_de_dados.bin"),
+                Path.Combine(dataPath, "indices_hash.bin")
+            };
 
-    //vou testar usar o conceito de summary e param, se funcionar LEMBRAR DE USAR MAIS NO FUTURO!!!!
-    /// <summary>
-    /// Importa registros de um arquivo CSV utilizando CsvHelper.
-    /// </summary>
-    /// <param name="caminhoCSV">O caminho do arquivo CSV fornecido pelo usuário.</param>
-    /// <returns>Uma lista de objetos do tipo RegistroDeRede.</returns
-    private static List<RegistroDeRede> ImportarRegistrosDoCSV(string caminhoCSV)
-    {
-        using (var reader = new StreamReader(caminhoCSV))
-        using (var csv = new CsvReader(reader, CultureInfo.InvariantCulture))
-        {
-            // Converte automaticamente os dados do CSV para o tipo RegistroDeRede
-            return new List<RegistroDeRede>(csv.GetRecords<RegistroDeRede>());
-        }
-    }
-
-
-    // Método para criar um novo registro com os dados fornecidos pelo usuário
-    private static RegistroDeRede ObterRegistroDoUsuario()
-    {
-        RegistroDeRede registro = new RegistroDeRede();
-
-        //Tenho que otimizar isso ainda, uma lista muito grande de items a coletar
-        //posso talvez modularizar a função em um .cs separado
-
-        //IMPORTANTE: tenho que melhorar o sistema de tratamento de entradas invalidas ao inves de 'parar' o sistema.
-
-        Console.Write("Timestamp (yyyy-MM-dd HH:mm:ss): ");
-        registro.Timestamp = DateTime.Parse(Console.ReadLine());
-        Console.Write("Source IP Address: ");
-        registro.SourceIPAddress = Console.ReadLine();
-        Console.Write("Destination IP Address: ");
-        registro.DestinationIPAddress = Console.ReadLine();
-        Console.Write("Source Port: ");
-        registro.SourcePort = int.Parse(Console.ReadLine());
-        Console.Write("Destination Port: ");
-        registro.DestinationPort = int.Parse(Console.ReadLine());
-        Console.Write("Protocol: ");
-        registro.Protocol = Console.ReadLine();
-        Console.Write("Packet Length: ");
-        registro.PacketLength = int.Parse(Console.ReadLine());
-        Console.Write("Packet Type: ");
-        registro.PacketType = Console.ReadLine();
-        Console.Write("Traffic Type: ");
-        registro.TrafficType = Console.ReadLine();
-        Console.Write("Payload Data: ");
-        registro.PayloadData = Console.ReadLine();
-        Console.Write("Malware Indicators: ");
-        registro.MalwareIndicators = Console.ReadLine();
-        Console.Write("Anomaly Scores: ");
-        registro.AnomalyScores = Convert.ToDouble(Console.ReadLine());
-        Console.Write("Alerts Warnings: ");
-        registro.AlertsWarnings = Console.ReadLine();
-        Console.Write("Attack Type: ");
-        registro.AttackType = Console.ReadLine();
-        Console.Write("Attack Signature: ");
-        registro.AttackSignature = Console.ReadLine();
-        Console.Write("Action Taken: ");
-        registro.ActionTaken = Console.ReadLine();
-        Console.Write("SeverityLevel: ");
-        registro.SeverityLevel = Console.ReadLine();
-        Console.Write("User Information: ");
-        registro.UserInformation = Console.ReadLine();
-        Console.Write("Device Information: ");
-        registro.DeviceInformation = Console.ReadLine();
-        Console.Write("Network Segment: ");
-        registro.NetworkSegment = Console.ReadLine();
-        Console.Write("Geo Location Data: ");
-        registro.GeoLocationData = Console.ReadLine();
-        Console.Write("Proxy Information: ");
-        registro.ProxyInformation = Console.ReadLine();
-        Console.Write("Firewall Logs: ");
-        registro.FirewallLogs = Console.ReadLine();
-        Console.Write("IDS IPS Alerts: ");
-        registro.IDSIPSAlerts = Console.ReadLine();
-        Console.Write("Log Source: ");
-        registro.LogSource = Console.ReadLine();
-
-        return registro;
-    }
-
-    // Método para listar todos os registros, talvez deva modularizar essa função também
-    private static void ListarRegistros(CRUD<RegistroDeRede> crud)
-    {
-        try
-        {
-            int ultimoID = crud.getUltimoID();
-
-            for (int i = 1; i <= ultimoID; i++)
+            foreach (var arquivo in arquivosBin)
             {
-                var registro = crud.Ler(i);
-                if (registro != null)
+                try
                 {
-                    Console.WriteLine($"Registro {registro.UID}: ");
-                    //Preciso colocar o restante dos itens a serem impressos aqui ainda.
-                    //usando somente o ID como teste de output por enquanto.
+                    if (File.Exists(arquivo))
+                    {
+                        File.Delete(arquivo);
+                        Console.WriteLine($"Arquivo {arquivo} excluído com sucesso.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Arquivo {arquivo} não existe. Nenhuma ação necessária.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Erro ao excluir arquivo {arquivo}: {ex.Message}");
+                    throw;
+                }
+            }
+
+            // Recriar diretório Data, se necessário
+            if (!Directory.Exists(dataPath))
+            {
+                try
+                {
+                    Directory.CreateDirectory(dataPath);
+                    Console.WriteLine($"Diretório {dataPath} criado com sucesso.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Erro ao criar diretório {dataPath}: {ex.Message}");
+                    throw;
                 }
             }
         }
-        catch (Exception ex)
+
+        private static void ExibirRegistro(RegistroDeRede registro)
         {
-            Console.WriteLine($"Erro ao listar registros: {ex.Message}");
+            Console.WriteLine($"ID: {registro.UID}");
+            Console.WriteLine($"Timestamp: {registro.Timestamp?.ToString("yyyy-MM-dd HH:mm:ss") ?? "Não fornecido"}");
+            Console.WriteLine($"Source IP: {registro.SourceIPAddress ?? "Não fornecido"}");
+            Console.WriteLine($"Destination IP: {registro.DestinationIPAddress ?? "Não fornecido"}");
+            Console.WriteLine($"Source Port: {registro.SourcePort?.ToString() ?? "Não fornecido"}");
+            Console.WriteLine($"Destination Port: {registro.DestinationPort?.ToString() ?? "Não fornecido"}");
+            Console.WriteLine($"Protocol: {registro.Protocol ?? "Não fornecido"}");
+            Console.WriteLine($"Packet Length: {registro.PacketLength?.ToString() ?? "Não fornecido"}");
+            Console.WriteLine($"Packet Type: {registro.PacketType ?? "Não fornecido"}");
+            Console.WriteLine($"Traffic Type: {registro.TrafficType ?? "Não fornecido"}");
+            Console.WriteLine($"Payload Data: {registro.PayloadData ?? "Não fornecido"}");
+            Console.WriteLine($"Malware Indicators: {registro.MalwareIndicators ?? "Não fornecido"}");
+            Console.WriteLine($"Anomaly Scores: {registro.AnomalyScores?.ToString() ?? "Não fornecido"}");
+            Console.WriteLine($"Alerts/Warnings: {registro.AlertsWarnings ?? "Não fornecido"}");
+            Console.WriteLine($"Attack Type: {registro.AttackType ?? "Não fornecido"}");
+            Console.WriteLine($"Attack Signature: {registro.AttackSignature ?? "Não fornecido"}");
+            Console.WriteLine($"Action Taken: {registro.ActionTaken ?? "Não fornecido"}");
+            Console.WriteLine($"Severity Level: {registro.SeverityLevel ?? "Não fornecido"}");
+            Console.WriteLine($"User Information: {registro.UserInformation ?? "Não fornecido"}");
+            Console.WriteLine($"Device Information: {registro.DeviceInformation ?? "Não fornecido"}");
+            Console.WriteLine($"Network Segment: {registro.NetworkSegment ?? "Não fornecido"}");
+            Console.WriteLine($"Geo-location Data: {registro.GeoLocationData ?? "Não fornecido"}");
+            Console.WriteLine($"Proxy Information: {registro.ProxyInformation ?? "Não fornecido"}");
+            Console.WriteLine($"Firewall Logs: {registro.FirewallLogs ?? "Não fornecido"}");
+            Console.WriteLine($"IDS/IPS Alerts: {registro.IDSIPSAlerts ?? "Não fornecido"}");
+            Console.WriteLine($"Log Source: {registro.LogSource ?? "Não fornecido"}");
         }
 
+        private static void ListarRegistros(CRUD<RegistroDeRede> crud)
+        {
+            try
+            {
+                int ultimoID = crud.getUltimoID();
+                for (int i = 1; i <= ultimoID; i++)
+                {
+                    var registro = crud.Ler(i);
+                    if (registro != null)
+                    {
+                        Console.WriteLine("\n-------------------------");
+                        ExibirRegistro(registro);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Erro ao listar registros: {ex.Message}");
+            }
+        }
     }
 }
-//AINDA PRECISO IMPLEMENTAR UMA FORMA DE EXPORTAR O CSV PARA ATUALIZAR!
