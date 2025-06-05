@@ -14,10 +14,9 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
 
         public ArvoreBPlus(string caminhoArquivoIndices, int ordem)
         {
-            // Garantir que caminhoArquivoIndices inclua o subdiretório Data e o nome do arquivo
-            string diretorioData = Path.Combine(Path.GetDirectoryName(caminhoArquivoIndices) ?? throw new ArgumentException("Diretório inválido"), "Data");
+            // Garantir que caminhoArquivoIndices inclua o subdiretório Data e o nome do arquivo 
+            string diretorioData = Path.Combine(caminhoArquivoIndices, "Data");
             caminhoArquivoIndices = Path.Combine(diretorioData, "indices_bplus.bin");
-
             Console.WriteLine($"Inicializando ArvoreBPlus com caminho: {caminhoArquivoIndices}");
             this.caminhoArquivoIndices = caminhoArquivoIndices;
             this.ordem = ordem;
@@ -29,9 +28,25 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                 Console.WriteLine($"Diretório {diretorioData} criado com sucesso.");
             }
 
-            if (!File.Exists(caminhoArquivoIndices))
+            // Forçar exclusão do arquivo existente para evitar corrupção
+            if (File.Exists(caminhoArquivoIndices))
             {
-                Console.WriteLine($"Arquivo {caminhoArquivoIndices} não existe. Criando novo arquivo...");
+                try
+                {
+                    File.Delete(caminhoArquivoIndices);
+                    Console.WriteLine($"Arquivo {caminhoArquivoIndices} excluído para reinicialização.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Erro ao excluir {caminhoArquivoIndices}: {ex.Message}");
+                    throw;
+                }
+            }
+
+            // Criar novo arquivo
+            Console.WriteLine($"Criando novo arquivo de índices: {caminhoArquivoIndices}");
+            try
+            {
                 using (var fs = new FileStream(caminhoArquivoIndices, FileMode.Create, FileAccess.Write))
                 {
                     byte[] cabecalho = new byte[8];
@@ -46,17 +61,10 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                 posicaoRaiz = 8;
                 Console.WriteLine($"Arquivo {caminhoArquivoIndices} criado com sucesso.");
             }
-            else
+            catch (Exception ex)
             {
-                using (var fs = new FileStream(caminhoArquivoIndices, FileMode.Open, FileAccess.Read))
-                {
-                    byte[] cabecalho = new byte[8];
-                    fs.Read(cabecalho, 0, 8);
-                    posicaoRaiz = BitConverter.ToInt64(cabecalho, 0);
-                    Console.WriteLine($"Arquivo {caminhoArquivoIndices} encontrado. Posição raiz: {posicaoRaiz}");
-                }
-                posicoesOcupadas.Add((8, 53));
-                posicoesOcupadas.Add((posicaoRaiz, posicaoRaiz == 8 ? 53 : 49));
+                Console.WriteLine($"Erro ao criar arquivo de índices: {ex.Message}");
+                throw;
             }
         }
 
@@ -137,22 +145,18 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                 int i = no.Chaves.Count - 1;
                 if (no.ÉFolha)
                 {
-                    // Procurar a posição correta para inserção
                     while (i >= 0 && no.Chaves[i] > id)
                     {
                         i--;
                     }
-                    // Verificar se a chave já existe
                     if (i >= 0 && no.Chaves[i] == id)
                     {
-                        // Chave duplicada encontrada
-                        throw new InvalidOperationException($"Chave {id} já existe no nó folha (Posição: {no.Posicao}).");
-                        // Alternativamente, atualizar a referência:
-                        // no.Referencias[i] = posicaoRegistro;
-                        // EscreverNo(no);
-                        // return;
+                        // Atualizar referência se existente
+                        no.Referencias[i] = posicaoRegistro;
+                        Console.WriteLine($"Atualizando referência para ID {id} na posição {posicaoRegistro}");
+                        EscreverNo(no);
+                        return;
                     }
-                    // Inserir a nova chave e referência na posição correta
                     no.Chaves.Insert(i + 1, id);
                     no.Referencias.Insert(i + 1, posicaoRegistro);
                     EscreverNo(no);

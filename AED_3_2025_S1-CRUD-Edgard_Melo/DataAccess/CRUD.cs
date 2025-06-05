@@ -51,6 +51,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess
                     {
                         fs.Write(BitConverter.GetBytes(0), 0, 4);
                     }
+                    ultimoId = 0;
                 }
                 else
                 {
@@ -59,6 +60,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess
                         byte[] buffer = new byte[4];
                         fs.Read(buffer, 0, 4);
                         ultimoId = BitConverter.ToInt32(buffer, 0);
+                        Console.WriteLine($"Arquivo binário inicializado. ultimoId lido: {ultimoId}");
                     }
                 }
             }
@@ -69,7 +71,60 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess
             }
         }
 
+
         public void Criar(T entidade)
+        {
+            if (entidade == null)
+                throw new ArgumentNullException(nameof(entidade));
+
+            var entidadeComId = entidade as IEntidade;
+            if (entidadeComId == null)
+                throw new ArgumentException("Entidade deve implementar IEntidadeComId");
+
+            lock (arquivoLock)
+            {
+                try
+                {
+                    // Atribuir um novo UID baseado no ultimoId
+                    entidadeComId.UID = ++ultimoId;
+
+                    using (var fs = new FileStream(caminhoArquivoBinario, FileMode.OpenOrCreate, FileAccess.ReadWrite))
+                    {
+                        long posicao;
+                        if (posicoesLivres.Any())
+                        {
+                            posicao = posicoesLivres.First();
+                            posicoesLivres.Remove(posicao);
+                        }
+                        else
+                        {
+                            posicao = fs.Length;
+                        }
+
+                        byte[] dados = Serializar(entidade);
+                        fs.Position = posicao;
+                        fs.Write(dados, 0, dados.Length);
+
+                        arvoreBPlus.Inserir(entidadeComId.UID, posicao);
+                        hashingEstendido.Inserir(entidadeComId.UID, posicao);
+
+                        // Atualizar o cabeçalho com o novo ultimoId
+                        byte[] cabecalho = BitConverter.GetBytes(ultimoId);
+                        fs.Position = 0;
+                        fs.Write(cabecalho, 0, cabecalho.Length);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Erro ao criar entidade (UID: {entidadeComId.UID}): {ex.Message}");
+                    throw;
+                }
+            }
+        }
+
+        /*muito bugado, estou refazendo o criar...
+         * 
+         * public void Criar(T entidade)
         {
             if (entidade == null)
                 throw new ArgumentNullException(nameof(entidade));
@@ -110,6 +165,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess
                             fs.Write(cabecalho, 0, cabecalho.Length);
                         }
                     }
+                    ultimoId++;
                 }
                 catch (Exception ex)
                 {
@@ -117,11 +173,15 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess
                     throw;
                 }
             }
-        }
+        }*/
 
         public void ReinicializarUltimoId(int novoUltimoId)
         {
-            ultimoId = novoUltimoId;
+            lock (arquivoLock)
+            {
+                ultimoId = novoUltimoId;
+                AtualizarCabecalho();
+            }
         }
 
         public T Ler(int id)

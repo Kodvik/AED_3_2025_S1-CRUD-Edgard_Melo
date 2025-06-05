@@ -31,7 +31,8 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Utilities
                 registro.UserInformation = ObterString("User Information (pressione Enter para vazio): ");
                 registro.DeviceInformation = ObterString("Device Information (pressione Enter para vazio): ");
                 registro.NetworkSegment = ObterString("Network Segment (pressione Enter para vazio): ");
-                registro.GeoLocationData = ObterString("Geo-location Data (pressione Enter para vazio): ");
+                string? geolocationDatatoCut = ObterString("Geo-location Data (pressione Enter para vazio): ");
+                registro.GeoLocationData = geolocationDatatoCut ?.Split(new[] { ',' }, StringSplitOptions.None).Select(part => part.Trim()).ToArray() ?? Array.Empty<string>();
                 registro.ProxyInformation = ObterString("Proxy Information (pressione Enter para vazio): ");
                 registro.FirewallLogs = ObterString("Firewall Logs (pressione Enter para vazio): ");
                 registro.IDSIPSAlerts = ObterString("IDS/IPS Alerts (pressione Enter para vazio): ");

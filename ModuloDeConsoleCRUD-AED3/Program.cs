@@ -48,6 +48,69 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo
                         // Limpar arquivos .bin
                         LimparArquivosBin(dataPath);
 
+                        // Reinicializar CRUD após limpeza
+                        crud = new CRUD<RegistroDeRede>(basePath, caminhoCSV);
+
+                        var importer = new CSVImporter();
+                        var registros = importer.ImportarCSV(caminhoCSV);
+                        Console.WriteLine($"Importação bem-sucedida! Foram carregados {registros.Count} registros.");
+
+                        // Atribuir novos UIDs para evitar duplicatas
+                        int novoUltimoId = crud.getUltimoID();
+                        foreach (var registro in registros)
+                        {
+                            try
+                            {
+                                // Atribuir um novo UID se o registro não tiver ou for inválido
+                                if (registro.UID <= 0 || registros.Any(r => r != registro && r.UID == registro.UID))
+                                {
+                                    registro.UID = ++novoUltimoId;
+                                }
+                                Console.WriteLine($"Criando registro (UID: {registro.UID})...");
+                                crud.Criar(registro);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Erro ao criar registro (UID: {registro.UID}): {ex.Message}");
+                            }
+                        }
+
+                        // Reinicializar ultimoId com o maior UID atribuído
+                        crud.ReinicializarUltimoId(novoUltimoId);
+                        Console.WriteLine($"ultimoId reinicializado para: {novoUltimoId}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Erro ao importar CSV: {ex.Message}");
+                    }
+                }
+            }
+
+            /*if (opcaoInicial == "1")
+            {
+                Console.WriteLine("Por favor, insira o caminho completo do arquivo CSV:");
+                caminhoCSV = Console.ReadLine();
+                if (string.IsNullOrWhiteSpace(caminhoCSV) || !File.Exists(caminhoCSV))
+                {
+                    Console.WriteLine("Caminho inválido ou arquivo não encontrado. Continuando sem importar.");
+                }
+                else
+                {
+                    try
+                    {
+                        // Confirmar limpeza dos arquivos .bin
+                        Console.WriteLine("A importação excluirá todos os dados existentes (.bin). Deseja continuar? (S/N)");
+                        if (Console.ReadLine()?.ToUpper() != "S")
+                        {
+                            Console.WriteLine("Importação cancelada.");
+                            Console.WriteLine("Pressione qualquer tecla para continuar para o menu");
+                            Console.ReadKey();
+                            return;
+                        }
+
+                        // Limpar arquivos .bin
+                        LimparArquivosBin(dataPath);
+
                         // Reinicializar CRUD após limpeza para recriar índices
                         crud = new CRUD<RegistroDeRede>(basePath, caminhoCSV);
 
@@ -79,7 +142,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo
                         Console.WriteLine($"Erro ao importar CSV: {ex.Message}");
                     }
                 }
-            }
+            }*/
 
             Console.WriteLine("Pressione qualquer tecla para continuar para o menu");
             Console.ReadKey();
@@ -96,6 +159,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo
                 Console.WriteLine("4 - Excluir");
                 Console.WriteLine("5 - Listar Todos os Registros");
                 Console.WriteLine("6 - Exportar para CSV");
+                Console.WriteLine("7 - Compactar Arquivos (.bin) com LZW ou Huffman");
                 Console.Write("Escolha a opção desejada: ");
 
                 string opcao = Console.ReadLine();
@@ -208,6 +272,10 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo
                         Console.Clear();
                         Console.Write("Digite o caminho completo para o arquivo CSV de exportação: ");
                         string caminhoExportacao = Console.ReadLine();
+                        if (!Directory.Exists(caminhoExportacao))
+                        {
+                            Console.WriteLine("Caminho inválido. Exportação cancelada.");
+                        }
                         if (string.IsNullOrWhiteSpace(caminhoExportacao))
                         {
                             Console.WriteLine("Caminho inválido. Exportação cancelada.");
@@ -221,6 +289,52 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo
                             catch (Exception ex)
                             {
                                 Console.WriteLine($"Erro ao exportar para CSV: {ex.Message}");
+                            }
+                        }
+                        Console.WriteLine("Pressione qualquer tecla para continuar");
+                        Console.ReadKey();
+                        break;
+
+                    case "7":
+                        Console.Clear();
+                        Console.WriteLine("Escolha o método de compactação:");
+                        Console.WriteLine("1 - LZW");
+                        Console.WriteLine("2 - Huffman");
+                        Console.Write("Digite a opção (1 ou 2): ");
+                        string metodoCompactacao = Console.ReadLine();
+                        string metodo = metodoCompactacao == "1" ? "LZW" : metodoCompactacao == "2" ? "Huffman" : null;
+
+                        if (metodo == null)
+                        {
+                            Console.WriteLine("Método de compactação inválido.");
+                        }
+                        else
+                        {
+                            try
+                            {
+                                string[] arquivosBin = {
+                                    Path.Combine(dataPath, "banco_de_dados.bin"),
+                                    Path.Combine(dataPath, "indices_bplus.bin"),
+                                    Path.Combine(dataPath, "indices_hash.bin")
+                                };
+
+                                foreach (var arquivo in arquivosBin)
+                                {
+                                    if (File.Exists(arquivo))
+                                    {
+                                        var gerenciador = new GerenciadorDeArquivo(arquivo);
+                                        gerenciador.CompactarArquivo(metodo);
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"Arquivo {arquivo} não existe. Ignorando.");
+                                    }
+                                }
+                                Console.WriteLine($"Compactação com {metodo} concluída!");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Erro ao compactar arquivos: {ex.Message}");
                             }
                         }
                         Console.WriteLine("Pressione qualquer tecla para continuar");
@@ -310,7 +424,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo
             Console.WriteLine($"User Information: {registro.UserInformation ?? "Não fornecido"}");
             Console.WriteLine($"Device Information: {registro.DeviceInformation ?? "Não fornecido"}");
             Console.WriteLine($"Network Segment: {registro.NetworkSegment ?? "Não fornecido"}");
-            Console.WriteLine($"Geo-location Data: {registro.GeoLocationData ?? "Não fornecido"}");
+            Console.WriteLine($"Geo-location Data: {(registro.GeoLocationData != null ? string.Join(", ", registro.GeoLocationData) : "Não fornecido")}");
             Console.WriteLine($"Proxy Information: {registro.ProxyInformation ?? "Não fornecido"}");
             Console.WriteLine($"Firewall Logs: {registro.FirewallLogs ?? "Não fornecido"}");
             Console.WriteLine($"IDS/IPS Alerts: {registro.IDSIPSAlerts ?? "Não fornecido"}");

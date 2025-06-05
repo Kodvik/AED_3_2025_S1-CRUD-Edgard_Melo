@@ -1,5 +1,7 @@
 ﻿using System;
 using System.IO;
+using AED_3_2025_S1_CRUD_Edgard_Melo.DataCompression;
+using AED_3_2025_S1_CRUD_Edgard_Melo.Utilities;
 
 namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess
 {
@@ -43,10 +45,35 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess
             }
         }
 
-        // Metodo futuro para compactação (a ser implementado) para o proximo TP
-        public void CompactarArquivo()
+        public void CompactarArquivo(string metodoCompactacao)
         {
-            // ainda preciso implementar
+            try
+            {
+                string diretorioSaida = Path.Combine(Path.GetDirectoryName(CaminhoArquivo), "Compressed");
+                Directory.CreateDirectory(diretorioSaida);
+                string extensao = metodoCompactacao.ToLower() == "lzw" ? ".lzw" : ".huff";
+                string caminhoSaida = Path.Combine(diretorioSaida, Path.GetFileNameWithoutExtension(CaminhoArquivo) + extensao);
+
+                if (metodoCompactacao.ToLower() == "lzw")
+                {
+                    var compressor = new LZWCompressor();
+                    compressor.Compress(CaminhoArquivo, caminhoSaida);
+                }
+                else if (metodoCompactacao.ToLower() == "huffman")
+                {
+                    var compressor = new HuffmanCompressor();
+                    compressor.Compress(CaminhoArquivo, caminhoSaida);
+                }
+                else
+                {
+                    throw new ArgumentException("Método de compactação inválido. Use 'LZW' ou 'Huffman'.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Erro ao compactar arquivo {CaminhoArquivo} com {metodoCompactacao}: {ex.Message}");
+                throw;
+            }
         }
     }
 }

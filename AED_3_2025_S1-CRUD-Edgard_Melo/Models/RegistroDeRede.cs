@@ -23,7 +23,7 @@
         public string? UserInformation { get; set; } // Mapeia "User Information"
         public string? DeviceInformation { get; set; } // Mapeia "Device Information"
         public string? NetworkSegment { get; set; } // Mapeia "Network Segment"
-        public string? GeoLocationData { get; set; } // Mapeia "Geo-location Data"
+        public string[]? GeoLocationData { get; set; } // Mapeia "Geo-location Data"
         public string? ProxyInformation { get; set; } // Mapeia "Proxy Information"
         public string? FirewallLogs { get; set; } // Mapeia "Firewall Logs"
         public string? IDSIPSAlerts { get; set; } // Mapeia "IDS/IPS Alerts"
