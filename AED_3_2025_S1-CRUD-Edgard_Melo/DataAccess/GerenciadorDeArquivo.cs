@@ -3,6 +3,10 @@ using System.IO;
 using AED_3_2025_S1_CRUD_Edgard_Melo.DataCompression;
 using AED_3_2025_S1_CRUD_Edgard_Melo.Utilities;
 
+// Notas de Desenvolvimento:
+// - Ajustei a nomenclatura dos arquivos compactados para seguir o padrão nomeArquivoNomeAlgoritmoCompressaoX (ex.: banco_de_dadosLZW1.bin).
+// - Mantive a lógica de compactação, mas agora com versão 1 como exemplo (pode incrementar dinamicamente depois).
+
 namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess
 {
     public class GerenciadorDeArquivo
@@ -26,13 +30,30 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess
             }
         }
 
-        public void GravarRegistro(byte[] dados, bool registroExcluido)
+        public void Gravar(byte[] dados, long posicao = -1)
         {
-            using (var fs = new FileStream(CaminhoArquivo, FileMode.Append))
+            try
             {
-                fs.WriteByte(registroExcluido ? (byte)0 : (byte)1);
-                fs.Write(BitConverter.GetBytes(dados.Length), 0, 4);
-                fs.Write(dados, 0, dados.Length);
+                using (var fs = new FileStream(CaminhoArquivo, FileMode.OpenOrCreate, FileAccess.Write))
+                {
+                    if (posicao == -1)
+                    {
+                        fs.Seek(0, SeekOrigin.End);
+                    }
+                    else
+                    {
+                        fs.Seek(posicao, SeekOrigin.Begin);
+                    }
+                    byte[] lapide = { 0 }; // Registro válido
+                    byte[] tamanho = BitConverter.GetBytes(dados.Length);
+                    fs.Write(lapide, 0, lapide.Length);
+                    fs.Write(tamanho, 0, tamanho.Length);
+                    fs.Write(dados, 0, dados.Length);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Erro ao gravar no arquivo: {ex.Message}");
             }
         }
 
@@ -51,8 +72,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataAccess
             {
                 string diretorioSaida = Path.Combine(Path.GetDirectoryName(CaminhoArquivo), "Compressed");
                 Directory.CreateDirectory(diretorioSaida);
-                string extensao = metodoCompactacao.ToLower() == "lzw" ? ".lzw" : ".huff";
-                string caminhoSaida = Path.Combine(diretorioSaida, Path.GetFileNameWithoutExtension(CaminhoArquivo) + extensao);
+                string caminhoSaida = Path.Combine(diretorioSaida, $"{Path.GetFileNameWithoutExtension(CaminhoArquivo)}{metodoCompactacao}1.bin");
 
                 if (metodoCompactacao.ToLower() == "lzw")
                 {

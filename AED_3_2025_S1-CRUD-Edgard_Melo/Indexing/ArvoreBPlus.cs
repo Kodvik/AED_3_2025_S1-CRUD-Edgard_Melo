@@ -1,6 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Diagnostics;
+
+// Notas de Desenvolvimento:
+// - Implementei a remoção parcial usando lápides no método Remover, marcando o nó como excluído sem remover completamente.
+// - Mantive a integridade da árvore, apenas atualizando a lápide no arquivo de índices.
+// - Adicionei medição de tempo em Remover.
 
 namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
 {
@@ -10,56 +16,40 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
         private readonly int ordem;
         private long posicaoRaiz;
         private readonly List<(long Posicao, int Tamanho)> posicoesOcupadas = new List<(long, int)>();
-        private readonly object arquivoLock = new object(); // Objeto para sincronização
+        private readonly object arquivoLock = new object();
 
         public ArvoreBPlus(string caminhoArquivoIndices, int ordem)
         {
-            // Garantir que caminhoArquivoIndices inclua o subdiretório Data e o nome do arquivo 
             string diretorioData = Path.Combine(caminhoArquivoIndices, "Data");
             caminhoArquivoIndices = Path.Combine(diretorioData, "indices_bplus.bin");
-            Console.WriteLine($"Inicializando ArvoreBPlus com caminho: {caminhoArquivoIndices}");
             this.caminhoArquivoIndices = caminhoArquivoIndices;
             this.ordem = ordem;
 
-            // Criar diretório Data, se não existir
             if (!Directory.Exists(diretorioData))
             {
                 Directory.CreateDirectory(diretorioData);
-                Console.WriteLine($"Diretório {diretorioData} criado com sucesso.");
             }
 
-            // Forçar exclusão do arquivo existente para evitar corrupção
             if (File.Exists(caminhoArquivoIndices))
             {
-                try
-                {
-                    File.Delete(caminhoArquivoIndices);
-                    Console.WriteLine($"Arquivo {caminhoArquivoIndices} excluído para reinicialização.");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Erro ao excluir {caminhoArquivoIndices}: {ex.Message}");
-                    throw;
-                }
+                try { File.Delete(caminhoArquivoIndices); }
+                catch (Exception ex) { Console.WriteLine($"Erro ao excluir {caminhoArquivoIndices}: {ex.Message}"); throw; }
             }
 
-            // Criar novo arquivo
-            Console.WriteLine($"Criando novo arquivo de índices: {caminhoArquivoIndices}");
             try
             {
                 using (var fs = new FileStream(caminhoArquivoIndices, FileMode.Create, FileAccess.Write))
                 {
                     byte[] cabecalho = new byte[8];
-                    BitConverter.GetBytes(8L).CopyTo(cabecalho, 0); // Posição inicial da raiz
+                    BitConverter.GetBytes(8L).CopyTo(cabecalho, 0);
                     fs.Write(cabecalho, 0, cabecalho.Length);
-                    NoBPlus noInicial = new NoBPlus(true) { Posicao = 8 };
+                    NoBPlus noInicial = new NoBPlus(true) { Posicao = 8, Lapide = 1 };
                     byte[] noData = SerializarNo(noInicial);
                     fs.Write(noData, 0, noData.Length);
-                    Console.WriteLine($"Nó inicial escrito. Tamanho do arquivo: {fs.Length} bytes");
-                    posicoesOcupadas.Add((8, 53)); // Reservar 53 bytes para nó inicial
+                    posicoesOcupadas.Add((8, 53));
                 }
                 posicaoRaiz = 8;
-                Console.WriteLine($"Arquivo {caminhoArquivoIndices} criado com sucesso.");
+                AtualizarCabecalho();
             }
             catch (Exception ex)
             {
@@ -84,9 +74,8 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                 }
             }
 
-            int tamanhoReservado = 61; // Máximo para folha ou não-folha
+            int tamanhoReservado = 61;
             posicoesOcupadas.Add((novaPosicao, tamanhoReservado));
-            Console.WriteLine($"Nova posição alocada: {novaPosicao}, Tamanho reservado: {tamanhoReservado} bytes");
             return novaPosicao;
         }
 
@@ -97,7 +86,6 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                 if (posicoesOcupadas[i].Posicao == posicao)
                 {
                     posicoesOcupadas[i] = (posicao, Math.Max(posicoesOcupadas[i].Tamanho, novoTamanho));
-                    Console.WriteLine($"Posição {posicao} atualizada, Tamanho: {posicoesOcupadas[i].Tamanho} bytes");
                     return;
                 }
             }
@@ -107,26 +95,17 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
         {
             try
             {
-                Console.WriteLine($"Inserindo ID: {id}, Posição Registro: {posicaoRegistro}");
                 NoBPlus noRaiz = LerNo(posicaoRaiz);
-                if (noRaiz == null)
-                {
-                    Console.WriteLine($"Erro: Nó raiz na posição {posicaoRaiz} é nulo ou corrompido.");
-                    throw new InvalidOperationException("Não foi possível ler o nó raiz.");
-                }
+                if (noRaiz == null || noRaiz.Lapide == 0)
+                    throw new InvalidOperationException("Nó raiz inválido ou excluído.");
 
                 if (noRaiz.Chaves.Count >= ordem)
                 {
-                    Console.WriteLine("Raiz cheia, dividindo...");
-                    NoBPlus novaRaiz = new NoBPlus(false) { Posicao = ObterNovaPosicao(49) };
+                    NoBPlus novaRaiz = new NoBPlus(false) { Posicao = ObterNovaPosicao(49), Lapide = 1 };
                     novaRaiz.Filhos.Add(noRaiz.Posicao);
                     DividirNo(novaRaiz, 0, noRaiz);
                     posicaoRaiz = novaRaiz.Posicao;
                     AtualizarCabecalho();
-                    if (!VerificarIntegridadeNoRaiz())
-                    {
-                        throw new InvalidOperationException("Nó raiz corrompido após divisão.");
-                    }
                     noRaiz = LerNo(posicaoRaiz);
                 }
                 InserirNaoCheio(noRaiz, id, posicaoRegistro);
@@ -151,9 +130,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                     }
                     if (i >= 0 && no.Chaves[i] == id)
                     {
-                        // Atualizar referência se existente
                         no.Referencias[i] = posicaoRegistro;
-                        Console.WriteLine($"Atualizando referência para ID {id} na posição {posicaoRegistro}");
                         EscreverNo(no);
                         return;
                     }
@@ -163,18 +140,14 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                 }
                 else
                 {
-                    // Procurar o filho apropriado
                     while (i >= 0 && no.Chaves[i] > id)
                     {
                         i--;
                     }
                     i++;
                     NoBPlus filho = LerNo(no.Filhos[i]);
-                    if (filho == null)
-                    {
-                        Console.WriteLine($"Erro: Filho na posição {no.Filhos[i]} é nulo.");
-                        throw new InvalidOperationException("Filho inválido.");
-                    }
+                    if (filho == null || filho.Lapide == 0)
+                        throw new InvalidOperationException("Filho inválido ou excluído.");
                     if (filho.Chaves.Count >= ordem)
                     {
                         DividirNo(no, i, filho);
@@ -185,7 +158,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                         filho = LerNo(no.Filhos[i]);
                     }
                     InserirNaoCheio(filho, id, posicaoRegistro);
-                    EscreverNo(no); // Re-escrever nó pai após modificações
+                    EscreverNo(no);
                 }
             }
             catch (Exception ex)
@@ -197,14 +170,12 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
 
         private void DividirNo(NoBPlus pai, int indice, NoBPlus filho)
         {
-            Console.WriteLine($"Dividindo nó (Posição: {filho.Posicao}, Chaves: [{string.Join(", ", filho.Chaves)}], ÉFolha: {filho.ÉFolha})");
             try
             {
-                NoBPlus novoNo = new NoBPlus(filho.ÉFolha) { Posicao = ObterNovaPosicao(filho.ÉFolha ? 53 : 49) };
+                NoBPlus novoNo = new NoBPlus(filho.ÉFolha) { Posicao = ObterNovaPosicao(filho.ÉFolha ? 53 : 49), Lapide = 1 };
                 int meio = filho.Chaves.Count / 2;
                 int chavePromovida = filho.Chaves[meio];
 
-                // Mover chaves e referências/filhos para o novo nó
                 novoNo.Chaves.AddRange(filho.Chaves.GetRange(meio + (filho.ÉFolha ? 0 : 1), filho.Chaves.Count - meio - (filho.ÉFolha ? 0 : 1)));
                 if (filho.ÉFolha)
                 {
@@ -215,7 +186,6 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                     novoNo.Filhos.AddRange(filho.Filhos.GetRange(meio + 1, filho.Filhos.Count - meio - 1));
                 }
 
-                // Remover chaves e referências/filhos do nó original
                 filho.Chaves.RemoveRange(meio, filho.Chaves.Count - meio);
                 if (filho.ÉFolha)
                 {
@@ -226,24 +196,20 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                     filho.Filhos.RemoveRange(meio + 1, filho.Filhos.Count - meio - 1);
                 }
 
-                // Ajustar ponteiro para próximo nó, se for folha
                 if (filho.ÉFolha)
                 {
                     novoNo.Proximo = filho.Proximo;
                     filho.Proximo = novoNo.Posicao;
                 }
 
-                // Escrever nós modificados
                 EscreverNo(novoNo);
                 EscreverNo(filho);
 
-                // Atualizar o nó pai
                 pai.Chaves.Insert(indice, chavePromovida);
                 pai.Filhos[indice] = filho.Posicao;
                 pai.Filhos.Insert(indice + 1, novoNo.Posicao);
                 EscreverNo(pai);
 
-                // Se o nó pai for a raiz, atualizar a posição da raiz
                 if (pai.Posicao == posicaoRaiz)
                 {
                     posicaoRaiz = pai.Posicao;
@@ -257,38 +223,10 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
             }
         }
 
-        private long ObterProximaPosicaoLivre(int tamanhoDados)
-        {
-            lock (arquivoLock)
-            {
-                if (posicoesOcupadas.Count == 0)
-                {
-                    return 8; // Após o cabeçalho
-                }
-
-                posicoesOcupadas.Sort((a, b) => a.Posicao.CompareTo(b.Posicao));
-                long ultimaPosicao = 8;
-
-                foreach (var (Posicao, Tamanho) in posicoesOcupadas)
-                {
-                    if (Posicao > ultimaPosicao)
-                    {
-                        if (Posicao - ultimaPosicao >= tamanhoDados)
-                        {
-                            return ultimaPosicao;
-                        }
-                    }
-                    ultimaPosicao = Math.Max(ultimaPosicao, Posicao + Tamanho);
-                }
-
-                return ultimaPosicao;
-            }
-        }
-
         public long Buscar(int id)
         {
             NoBPlus no = LerNo(posicaoRaiz);
-            while (no != null && !no.ÉFolha)
+            while (no != null && !no.ÉFolha && no.Lapide == 1)
             {
                 int i = 0;
                 while (i < no.Chaves.Count && id > no.Chaves[i])
@@ -297,7 +235,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                 }
                 no = LerNo(no.Filhos[i]);
             }
-            if (no == null) return -1;
+            if (no == null || no.Lapide == 0) return -1;
             for (int i = 0; i < no.Chaves.Count; i++)
             {
                 if (no.Chaves[i] == id)
@@ -310,41 +248,80 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
 
         public void Remover(int id)
         {
-            // Implementação de remoção (simplificada para o escopo)
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                long posicao = Buscar(id);
+                if (posicao == -1)
+                {
+                    Console.WriteLine($"ID {id} não encontrado para remoção.");
+                    return;
+                }
+
+                // Encontrar o nó folha que contém o ID
+                NoBPlus no = LerNo(posicaoRaiz);
+                while (no != null && !no.ÉFolha && no.Lapide == 1)
+                {
+                    int i = 0;
+                    while (i < no.Chaves.Count && id > no.Chaves[i])
+                    {
+                        i++;
+                    }
+                    no = LerNo(no.Filhos[i]);
+                }
+                if (no == null || no.Lapide == 0)
+                {
+                    Console.WriteLine($"Nó para ID {id} inválido ou excluído.");
+                    return;
+                }
+
+                // Remover a chave e referência do nó
+                int index = no.Chaves.IndexOf(id);
+                if (index >= 0)
+                {
+                    no.Chaves.RemoveAt(index);
+                    no.Referencias.RemoveAt(index);
+                    no.Lapide = no.Chaves.Count > 0 ? (byte)1 : (byte)0;
+                    EscreverNo(no);
+                    Console.WriteLine($"UID {id} removido da árvore B+.");
+                }
+                else
+                {
+                    Console.WriteLine($"ID {id} não encontrado no nó folha.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Erro ao remover ID {id} na Árvore B+: {ex.Message}");
+            }
+            finally
+            {
+                stopwatch.Stop();
+                Console.WriteLine($"Remoção de UID {id} concluída em {stopwatch.ElapsedMilliseconds}ms");
+            }
         }
 
         private NoBPlus LerNo(long posicao)
         {
             if (posicao < 0)
-            {
-                Console.WriteLine($"Posição inválida para leitura: {posicao}");
                 return null;
-            }
 
             try
             {
                 using (var fs = new FileStream(caminhoArquivoIndices, FileMode.Open, FileAccess.Read))
                 {
                     if (posicao >= fs.Length)
-                    {
-                        Console.WriteLine($"Posição {posicao} fora do tamanho do arquivo ({fs.Length}).");
                         return null;
-                    }
 
                     fs.Seek(posicao, SeekOrigin.Begin);
-                    byte[] buffer = new byte[1];
-                    fs.Read(buffer, 0, 1);
-                    bool éFolha = buffer[0] == 1;
+                    byte lapide = (byte)fs.ReadByte();
+                    if (lapide == 0) return null; // Ignora nós excluídos
 
-                    buffer = new byte[4];
+                    bool éFolha = fs.ReadByte() == 1;
+
+                    byte[] buffer = new byte[4];
                     fs.Read(buffer, 0, 4);
                     int numChaves = BitConverter.ToInt32(buffer, 0);
-
-                    if (numChaves > ordem || numChaves < 0)
-                    {
-                        Console.WriteLine($"Erro: numChaves ({numChaves}) inválido na posição {posicao}. Ordem: {ordem}.");
-                        return null;
-                    }
 
                     List<int> chaves = new List<int>();
                     for (int i = 0; i < numChaves; i++)
@@ -365,7 +342,6 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                             fs.Read(buffer, 0, 8);
                             referencias.Add(BitConverter.ToInt64(buffer, 0));
                         }
-                        // Ler Proximo
                         buffer = new byte[8];
                         fs.Read(buffer, 0, 8);
                         proximo = BitConverter.ToInt64(buffer, 0);
@@ -380,17 +356,15 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                         }
                     }
 
-                    var no = new NoBPlus(éFolha)
+                    return new NoBPlus(éFolha)
                     {
                         Posicao = posicao,
                         Chaves = chaves,
                         Referencias = referencias,
                         Filhos = filhos,
-                        Proximo = proximo
+                        Proximo = proximo,
+                        Lapide = lapide
                     };
-                    Console.WriteLine($"Nó lido na posição {posicao}. ÉFolha: {no.ÉFolha}, Chaves: [{string.Join(", ", no.Chaves)}], " +
-                                      $"Filhos: [{string.Join(", ", no.Filhos)}], Referências: [{string.Join(", ", no.Referencias)}], Proximo: {no.Proximo}");
-                    return no;
                 }
             }
             catch (Exception ex)
@@ -409,14 +383,13 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                 {
                     using (var fs = new FileStream(caminhoArquivoIndices, FileMode.OpenOrCreate, FileAccess.Write))
                     {
-                        long novaPosicao = no.Posicao == -1 ? ObterProximaPosicaoLivre(noData.Length) : no.Posicao;
+                        long novaPosicao = no.Posicao == -1 ? ObterNovaPosicao(noData.Length) : no.Posicao;
                         if (novaPosicao + noData.Length > fs.Length)
                         {
                             fs.SetLength(novaPosicao + noData.Length);
                         }
                         fs.Position = novaPosicao;
                         fs.Write(noData, 0, noData.Length);
-                        Console.WriteLine($"Nó escrito na posição {novaPosicao}. ÉFolha: {no.ÉFolha}, Chaves: [{string.Join(", ", no.Chaves)}], Tamanho dos dados: {noData.Length}, Tamanho do arquivo: {fs.Length} bytes, Intervalo: [{novaPosicao}, {novaPosicao + noData.Length})");
                         if (no.Posicao != novaPosicao)
                         {
                             no.Posicao = novaPosicao;
@@ -437,22 +410,12 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
             try
             {
                 NoBPlus noRaiz = LerNo(posicaoRaiz);
-                if (noRaiz == null)
-                {
-                    Console.WriteLine($"Erro: Nó raiz na posição {posicaoRaiz} é nulo.");
+                if (noRaiz == null || noRaiz.Lapide == 0)
                     return false;
-                }
                 if (noRaiz.Chaves.Count > ordem || noRaiz.Chaves.Count < 0)
-                {
-                    Console.WriteLine($"Erro: Nó raiz na posição {posicaoRaiz} tem numChaves inválido: {noRaiz.Chaves.Count}");
                     return false;
-                }
                 if (!noRaiz.ÉFolha && noRaiz.Filhos.Count != noRaiz.Chaves.Count + 1)
-                {
-                    Console.WriteLine($"Erro: Nó raiz não-folha na posição {posicaoRaiz} tem {noRaiz.Filhos.Count} filhos, esperado {noRaiz.Chaves.Count + 1}");
                     return false;
-                }
-                Console.WriteLine($"Integridade do nó raiz verificada: Posição: {posicaoRaiz}, ÉFolha: {noRaiz.ÉFolha}, Chaves: [{string.Join(", ", noRaiz.Chaves)}]");
                 return true;
             }
             catch (Exception ex)
@@ -468,40 +431,29 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
             {
                 using (var ms = new MemoryStream())
                 {
-                    // Escrever ÉFolha
+                    ms.WriteByte(no.Lapide);
                     ms.WriteByte((byte)(no.ÉFolha ? 1 : 0));
 
-                    // Validar número de chaves
                     if (no.Chaves.Count > ordem)
-                    {
                         throw new InvalidOperationException("Número de chaves excede ordem.");
-                    }
                     if (no.ÉFolha && no.Referencias.Count != no.Chaves.Count)
-                    {
                         throw new InvalidOperationException("Número de referências não corresponde às chaves.");
-                    }
                     if (!no.ÉFolha && no.Filhos.Count != no.Chaves.Count + 1)
-                    {
                         throw new InvalidOperationException("Número de filhos não corresponde às chaves + 1.");
-                    }
 
-                    // Escrever número de chaves
                     ms.Write(BitConverter.GetBytes(no.Chaves.Count), 0, 4);
 
-                    // Escrever chaves
                     foreach (int chave in no.Chaves)
                     {
                         ms.Write(BitConverter.GetBytes(chave), 0, 4);
                     }
 
-                    // Escrever referências (se folha) ou filhos (se não-folha)
                     if (no.ÉFolha)
                     {
                         foreach (long referencia in no.Referencias)
                         {
                             ms.Write(BitConverter.GetBytes(referencia), 0, 8);
                         }
-                        // Escrever Proximo
                         ms.Write(BitConverter.GetBytes(no.Proximo), 0, 8);
                     }
                     else
@@ -512,10 +464,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                         }
                     }
 
-                    byte[] data = ms.ToArray();
-                    Console.WriteLine($"Serializando nó (Posição: {no.Posicao}, ÉFolha: {no.ÉFolha}, Chaves: [{string.Join(", ", no.Chaves)}], " +
-                                      $"Tamanho dos dados: {data.Length} bytes, Filhos: [{string.Join(", ", no.Filhos)}], Referências: [{string.Join(", ", no.Referencias)}], Proximo: {no.Proximo}");
-                    return data;
+                    return ms.ToArray();
                 }
             }
             catch (Exception ex)
@@ -535,7 +484,6 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
                     fs.Seek(0, SeekOrigin.Begin);
                     fs.Write(posicaoRaizBytes, 0, posicaoRaizBytes.Length);
                     fs.Flush();
-                    Console.WriteLine($"Cabeçalho atualizado. Posição Raiz: {posicaoRaiz}, Tamanho do arquivo: {fs.Length} bytes");
                 }
             }
             catch (Exception ex)
@@ -554,6 +502,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
         public List<long> Referencias { get; set; }
         public List<long> Filhos { get; set; }
         public long Proximo { get; set; }
+        public byte Lapide { get; set; } // Adicionado para suportar lápides
 
         public NoBPlus(bool éFolha)
         {
@@ -563,6 +512,7 @@ namespace AED_3_2025_S1_CRUD_Edgard_Melo.Indexing
             Referencias = new List<long>();
             Filhos = new List<long>();
             Proximo = 0;
+            Lapide = 1; // Lápide inicial como ativa
         }
     }
 }

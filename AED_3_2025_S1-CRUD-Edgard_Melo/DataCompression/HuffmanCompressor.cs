@@ -2,304 +2,213 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using AED_3_2025_S1_CRUD_Edgard_Melo.Utilities;
 
-namespace AED_3_2025_S1_CRUD_Edgard_Melo.Utilities
+namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataCompression
 {
-    public class HuffmanCompressor
+    public class HuffmanCompressor : ICompressor
     {
-        private class NoHuffman
+        private class HuffmanNode
         {
-            public byte? Valor { get; set; }
-            public long Frequencia { get; set; }
-            public NoHuffman Esquerda { get; set; }
-            public NoHuffman Direita { get; set; }
+            public byte Data { get; set; }
+            public long Frequency { get; set; }
+            public HuffmanNode Left { get; set; }
+            public HuffmanNode Right { get; set; }
+            public bool IsLeaf => Left == null && Right == null;
         }
 
         public void Compress(string inputPath, string outputPath)
         {
-            try
+            if (!File.Exists(inputPath))
+                throw new FileNotFoundException("Arquivo de entrada não encontrado.", inputPath);
+
+            byte[] inputData = File.ReadAllBytes(inputPath);
+            if (inputData.Length == 0)
             {
-                byte[] inputBytes = File.ReadAllBytes(inputPath);
-                if (inputBytes.Length == 0)
-                {
-                    File.WriteAllBytes(outputPath, new byte[0]);
-                    Console.WriteLine($"Arquivo vazio comprimido: {inputPath} -> {outputPath}");
-                    return;
-                }
-
-                // Calcular frequências
-                long[] frequencias = new long[256];
-                foreach (byte b in inputBytes)
-                {
-                    frequencias[b]++;
-                }
-
-                // Logar bytes com frequência > 0
-                Console.WriteLine("Frequências dos bytes:");
-                for (int i = 0; i < 256; i++)
-                {
-                    if (frequencias[i] > 0)
-                        Console.WriteLine($"Byte {i}: {frequencias[i]} ocorrências");
-                }
-
-                // Construir árvore de Huffman
-                NoHuffman raiz = ConstruirArvoreHuffman(frequencias);
-                Dictionary<byte, string> codigos = GerarCodigosHuffman(raiz);
-
-                // Logar códigos gerados
-                Console.WriteLine("Códigos Huffman gerados:");
-                foreach (var kvp in codigos)
-                {
-                    Console.WriteLine($"Byte {kvp.Key}: {kvp.Value}");
-                }
-
-                // Comprimir dados
-                using (var ms = new MemoryStream())
-                using (var writer = new BinaryWriter(ms))
-                {
-                    // Serializar árvore
-                    SerializarArvore(raiz, writer);
-                    // Escrever tamanho dos dados originais
-                    writer.Write((long)inputBytes.Length);
-                    // Comprimir dados
-                    string bits = string.Concat(inputBytes.Select(b =>
-                    {
-                        if (!codigos.ContainsKey(b))
-                        {
-                            throw new KeyNotFoundException($"Byte {b} não encontrado no dicionário de códigos.");
-                        }
-                        return codigos[b];
-                    }));
-                    byte[] compressedBytes = ConverterBitsParaBytes(bits);
-                    writer.Write(compressedBytes);
-
-                    File.WriteAllBytes(outputPath, ms.ToArray());
-                }
-
-                Console.WriteLine($"Arquivo comprimido com Huffman: {inputPath} -> {outputPath}");
-                Console.WriteLine($"Tamanho original: {inputBytes.Length} bytes, Tamanho comprimido: {new FileInfo(outputPath).Length} bytes");
+                File.Create(outputPath).Dispose();
+                return;
             }
-            catch (Exception ex)
+
+            var frequencyTable = BuildFrequencyTable(inputData);
+            var huffmanTree = BuildHuffmanTree(frequencyTable);
+            var huffmanCodes = BuildHuffmanCodes(huffmanTree);
+
+            using (var outputStream = new FileStream(outputPath, FileMode.Create))
+            using (var writer = new BinaryWriter(outputStream))
             {
-                Console.WriteLine($"Erro ao comprimir com Huffman ({inputPath}): {ex.Message}");
-                throw;
+                WriteHeader(writer, frequencyTable);
+                WriteCompressedData(writer, inputData, huffmanCodes);
             }
         }
 
         public void Decompress(string inputPath, string outputPath)
         {
-            try
-            {
-                using (var fs = new FileStream(inputPath, FileMode.Open))
-                using (var reader = new BinaryReader(fs))
-                {
-                    // Ler árvore
-                    NoHuffman raiz = DesserializarArvore(reader);
-                    // Ler tamanho dos dados originais
-                    long tamanhoOriginal = reader.ReadInt64();
-                    // Ler dados comprimidos
-                    byte[] compressedBytes = reader.ReadBytes((int)(fs.Length - fs.Position));
-                    string bits = ConverterBytesParaBits(compressedBytes);
+            if (!File.Exists(inputPath))
+                throw new FileNotFoundException("Arquivo de entrada não encontrado.", inputPath);
 
-                    // Descomprimir dados
-                    List<byte> outputBytes = new List<byte>();
-                    NoHuffman atual = raiz;
-                    foreach (char bit in bits)
-                    {
-                        atual = bit == '0' ? atual.Esquerda : atual.Direita;
-                        if (atual.Valor.HasValue)
-                        {
-                            outputBytes.Add(atual.Valor.Value);
-                            atual = raiz;
-                            if (outputBytes.Count == tamanhoOriginal)
-                                break;
-                        }
-                    }
-
-                    File.WriteAllBytes(outputPath, outputBytes.ToArray());
-                    Console.WriteLine($"Arquivo descomprimido com Huffman: {inputPath} -> {outputPath}");
-                }
-            }
-            catch (Exception ex)
+            using (var inputStream = new FileStream(inputPath, FileMode.Open))
+            using (var reader = new BinaryReader(inputStream))
+            using (var outputStream = new FileStream(outputPath, FileMode.Create))
             {
-                Console.WriteLine($"Erro ao descomprimir com Huffman ({inputPath}): {ex.Message}");
-                throw;
+                var frequencyTable = ReadHeader(reader);
+                var huffmanTree = BuildHuffmanTree(frequencyTable);
+                DecodeData(reader, outputStream, huffmanTree, inputStream.Length);
             }
         }
 
-        private NoHuffman ConstruirArvoreHuffman(long[] frequencias)
+        private Dictionary<byte, long> BuildFrequencyTable(byte[] data)
         {
-            var heap = new PriorityQueue<NoHuffman, long>();
-            for (int i = 0; i < 256; i++)
+            var frequencyTable = new Dictionary<byte, long>();
+            foreach (byte b in data)
             {
-                if (frequencias[i] > 0)
-                {
-                    heap.Enqueue(new NoHuffman { Valor = (byte)i, Frequencia = frequencias[i] }, frequencias[i]);
-                }
+                if (frequencyTable.ContainsKey(b))
+                    frequencyTable[b]++;
+                else
+                    frequencyTable[b] = 1;
             }
+            return frequencyTable;
+        }
 
-            if (heap.Count == 0)
+        private HuffmanNode BuildHuffmanTree(Dictionary<byte, long> frequencyTable)
+        {
+            var nodes = frequencyTable.Select(kvp => new HuffmanNode
             {
-                throw new InvalidOperationException("Nenhum byte com frequência maior que zero.");
-            }
+                Data = kvp.Key,
+                Frequency = kvp.Value
+            }).ToList();
 
-            while (heap.Count > 1)
+            while (nodes.Count > 1)
             {
-                heap.TryDequeue(out var esq, out var freqEsq);
-                heap.TryDequeue(out var dir, out var freqDir);
-
-                var pai = new NoHuffman
+                nodes = nodes.OrderBy(n => n.Frequency).ToList();
+                var left = nodes[0];
+                var right = nodes[1];
+                var parent = new HuffmanNode
                 {
-                    Frequencia = freqEsq + freqDir,
-                    Esquerda = esq,
-                    Direita = dir
+                    Frequency = left.Frequency + right.Frequency,
+                    Left = left,
+                    Right = right
                 };
-
-                heap.Enqueue(pai, pai.Frequencia);
+                nodes.RemoveAt(0);
+                nodes.RemoveAt(0);
+                nodes.Add(parent);
             }
 
-            heap.TryDequeue(out var raiz, out _);
-            return raiz;
+            return nodes.FirstOrDefault();
         }
 
-        private Dictionary<byte, string> GerarCodigosHuffman(NoHuffman raiz)
+        private Dictionary<byte, string> BuildHuffmanCodes(HuffmanNode root)
         {
-            var codigos = new Dictionary<byte, string>();
-            if (raiz.Valor.HasValue)
-            {
-                // Caso especial: apenas um byte no arquivo
-                codigos[raiz.Valor.Value] = "0";
-            }
-            else
-            {
-                GerarCodigosHuffmanRecursivo(raiz, "", codigos);
-            }
-            return codigos;
+            var huffmanCodes = new Dictionary<byte, string>();
+            BuildHuffmanCodesRecursive(root, "", huffmanCodes);
+            return huffmanCodes;
         }
 
-        private void GerarCodigosHuffmanRecursivo(NoHuffman no, string codigo, Dictionary<byte, string> codigos)
+        private void BuildHuffmanCodesRecursive(HuffmanNode node, string code, Dictionary<byte, string> huffmanCodes)
         {
-            if (no.Valor.HasValue)
-            {
-                codigos[no.Valor.Value] = codigo.Length > 0 ? codigo : "0";
+            if (node == null)
                 return;
-            }
-            if (no.Esquerda != null)
-                GerarCodigosHuffmanRecursivo(no.Esquerda, codigo + "0", codigos);
-            if (no.Direita != null)
-                GerarCodigosHuffmanRecursivo(no.Direita, codigo + "1", codigos);
-        }
 
-        private void SerializarArvore(NoHuffman no, BinaryWriter writer)
-        {
-            if (no.Valor.HasValue)
+            if (node.IsLeaf)
             {
-                writer.Write((byte)1);
-                writer.Write(no.Valor.Value);
+                huffmanCodes[node.Data] = code.Length > 0 ? code : "0";
             }
             else
             {
-                writer.Write((byte)0);
-                SerializarArvore(no.Esquerda, writer);
-                SerializarArvore(no.Direita, writer);
+                BuildHuffmanCodesRecursive(node.Left, code + "0", huffmanCodes);
+                BuildHuffmanCodesRecursive(node.Right, code + "1", huffmanCodes);
             }
         }
 
-        private NoHuffman DesserializarArvore(BinaryReader reader)
+        private void WriteHeader(BinaryWriter writer, Dictionary<byte, long> frequencyTable)
         {
-            byte isFolha = reader.ReadByte();
-            if (isFolha == 1)
+            writer.Write(frequencyTable.Count);
+            foreach (var kvp in frequencyTable)
             {
-                return new NoHuffman { Valor = reader.ReadByte() };
+                writer.Write(kvp.Key);
+                writer.Write(kvp.Value);
             }
-            var no = new NoHuffman
-            {
-                Esquerda = DesserializarArvore(reader),
-                Direita = DesserializarArvore(reader)
-            };
-            return no;
         }
 
-        private byte[] ConverterBitsParaBytes(string bits)
+        private Dictionary<byte, long> ReadHeader(BinaryReader reader)
         {
-            int padding = (8 - (bits.Length % 8)) % 8;
-            bits += new string('0', padding);
-            List<byte> bytes = new List<byte>();
-            for (int i = 0; i < bits.Length; i += 8)
+            var frequencyTable = new Dictionary<byte, long>();
+            int count = reader.ReadInt32();
+            for (int i = 0; i < count; i++)
             {
-                string byteStr = bits.Substring(i, Math.Min(8, bits.Length - i));
-                bytes.Add(Convert.ToByte(byteStr, 2));
+                byte data = reader.ReadByte();
+                long frequency = reader.ReadInt64();
+                frequencyTable[data] = frequency;
             }
-            return bytes.ToArray();
+            return frequencyTable;
         }
 
-        private string ConverterBytesParaBits(byte[] bytes)
+        private void WriteCompressedData(BinaryWriter writer, byte[] inputData, Dictionary<byte, string> huffmanCodes)
         {
-            return string.Concat(bytes.Select(b => Convert.ToString(b, 2).PadLeft(8, '0')));
-        }
+            byte currentByte = 0;
+            int bitCount = 0;
 
-        // Implementação de PriorityQueue para .NET 8
-        private class PriorityQueue<TElement, TPriority>
-        {
-            private readonly List<(TElement Element, TPriority Priority)> _elements = new List<(TElement, TPriority)>();
-            private readonly IComparer<TPriority> _comparer;
-
-            public PriorityQueue()
+            foreach (byte b in inputData)
             {
-                _comparer = Comparer<TPriority>.Default;
-            }
-
-            public int Count => _elements.Count;
-
-            public void Enqueue(TElement element, TPriority priority)
-            {
-                _elements.Add((element, priority));
-                int i = _elements.Count - 1;
-                while (i > 0)
+                string code = huffmanCodes[b];
+                foreach (char bit in code)
                 {
-                    int parent = (i - 1) / 2;
-                    if (_comparer.Compare(_elements[parent].Priority, _elements[i].Priority) <= 0)
-                        break;
-                    (_elements[i], _elements[parent]) = (_elements[parent], _elements[i]);
-                    i = parent;
+                    currentByte = (byte)((currentByte << 1) | (bit == '1' ? 1 : 0));
+                    bitCount++;
+                    if (bitCount == 8)
+                    {
+                        writer.Write(currentByte);
+                        currentByte = 0;
+                        bitCount = 0;
+                    }
                 }
             }
 
-            public bool TryDequeue(out TElement element, out TPriority priority)
+            if (bitCount > 0)
             {
-                if (_elements.Count == 0)
-                {
-                    element = default;
-                    priority = default;
-                    return false;
-                }
-
-                element = _elements[0].Element;
-                priority = _elements[0].Priority;
-                _elements[0] = _elements[^1];
-                _elements.RemoveAt(_elements.Count - 1);
-
-                int i = 0;
-                while (true)
-                {
-                    int left = 2 * i + 1;
-                    int right = 2 * i + 2;
-                    int smallest = i;
-
-                    if (left < _elements.Count && _comparer.Compare(_elements[left].Priority, _elements[smallest].Priority) < 0)
-                        smallest = left;
-                    if (right < _elements.Count && _comparer.Compare(_elements[right].Priority, _elements[smallest].Priority) < 0)
-                        smallest = right;
-
-                    if (smallest == i)
-                        break;
-
-                    (_elements[i], _elements[smallest]) = (_elements[smallest], _elements[i]);
-                    i = smallest;
-                }
-
-                return true;
+                currentByte <<= (8 - bitCount);
+                writer.Write(currentByte);
             }
+        }
+
+        private void DecodeData(BinaryReader reader, FileStream outputStream, HuffmanNode root, long inputLength)
+        {
+            HuffmanNode currentNode = root;
+            long bytesRead = 4 + GetHeaderSize(root);
+
+            while (bytesRead < inputLength)
+            {
+                byte b = reader.ReadByte();
+                bytesRead++;
+
+                for (int i = 7; i >= 0 && bytesRead <= inputLength; i--)
+                {
+                    int bit = (b >> i) & 1;
+                    currentNode = bit == 0 ? currentNode.Left : currentNode.Right;
+
+                    if (currentNode.IsLeaf)
+                    {
+                        outputStream.WriteByte(currentNode.Data);
+                        currentNode = root;
+                    }
+                }
+            }
+        }
+
+        private int GetHeaderSize(HuffmanNode root)
+        {
+            int count = 0;
+            CountLeaves(root, ref count);
+            return 4 + count * (1 + 8);
+        }
+
+        private void CountLeaves(HuffmanNode node, ref int count)
+        {
+            if (node == null)
+                return;
+            if (node.IsLeaf)
+                count++;
+            CountLeaves(node.Left, ref count);
+            CountLeaves(node.Right, ref count);
         }
     }
 }

@@ -1,153 +1,156 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using AED_3_2025_S1_CRUD_Edgard_Melo.Utilities;
 
 namespace AED_3_2025_S1_CRUD_Edgard_Melo.DataCompression
 {
-    public class LZWCompressor
+    public class LZWCompressor : ICompressor
     {
-        private const int BitsPorCodigo = 12;
-        private const int MaxCodigo = (1 << BitsPorCodigo) - 1; // 4095
-
         public void Compress(string inputPath, string outputPath)
         {
-            try
+            if (!File.Exists(inputPath))
+                throw new FileNotFoundException("Arquivo de entrada não encontrado.", inputPath);
+
+            byte[] inputData = File.ReadAllBytes(inputPath);
+            if (inputData.Length == 0)
             {
-                byte[] inputBytes = File.ReadAllBytes(inputPath);
-                Dictionary<string, int> dicionario = InicializarDicionario();
-                List<int> codigos = new List<int>();
-                string sequenciaAtual = "";
-
-                foreach (byte b in inputBytes)
-                {
-                    string novaSequencia = sequenciaAtual + (char)b;
-                    if (dicionario.ContainsKey(novaSequencia))
-                    {
-                        sequenciaAtual = novaSequencia;
-                    }
-                    else
-                    {
-                        codigos.Add(dicionario[sequenciaAtual]);
-                        if (dicionario.Count < MaxCodigo)
-                        {
-                            dicionario.Add(novaSequencia, dicionario.Count);
-                        }
-                        sequenciaAtual = "" + (char)b;
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(sequenciaAtual))
-                {
-                    codigos.Add(dicionario[sequenciaAtual]);
-                }
-
-                using (var fs = new FileStream(outputPath, FileMode.Create))
-                using (var writer = new BinaryWriter(fs))
-                {
-                    writer.Write(codigos.Count);
-                    WriteCodigos(codigos, writer);
-                }
-
-                Console.WriteLine($"Arquivo comprimido com LZW: {inputPath} -> {outputPath}");
-                Console.WriteLine($"Tamanho original: {inputBytes.Length} bytes, Tamanho comprimido: {new FileInfo(outputPath).Length} bytes");
+                File.Create(outputPath).Dispose();
+                return;
             }
-            catch (Exception ex)
+
+            var dictionary = InitializeDictionary();
+            List<int> compressedData = CompressData(inputData, dictionary);
+
+            using (var outputStream = new FileStream(outputPath, FileMode.Create))
+            using (var writer = new BinaryWriter(outputStream))
             {
-                Console.WriteLine($"Erro ao comprimir com LZW ({inputPath}): {ex.Message}");
-                throw;
+                foreach (int code in compressedData)
+                {
+                    writer.Write(code);
+                }
             }
         }
 
         public void Decompress(string inputPath, string outputPath)
         {
-            try
+            if (!File.Exists(inputPath))
+                throw new FileNotFoundException("Arquivo de entrada não encontrado.", inputPath);
+
+            List<int> compressedData = ReadCompressedData(inputPath);
+            var dictionary = InitializeReverseDictionary();
+            byte[] decompressedData = DecompressData(compressedData, dictionary);
+
+            File.WriteAllBytes(outputPath, decompressedData);
+        }
+
+        private Dictionary<string, int> InitializeDictionary()
+        {
+            var dictionary = new Dictionary<string, int>();
+            for (int i = 0; i < 256; i++)
             {
-                List<int> codigos;
-                using (var fs = new FileStream(inputPath, FileMode.Open))
-                using (var reader = new BinaryReader(fs))
+                dictionary[((char)i).ToString()] = i;
+            }
+            return dictionary;
+        }
+
+        private List<int> CompressData(byte[] inputData, Dictionary<string, int> dictionary)
+        {
+            string current = "";
+            List<int> compressedData = new List<int>();
+            int nextCode = 256;
+
+            foreach (byte b in inputData)
+            {
+                string currentPlusByte = current + (char)b;
+                if (dictionary.ContainsKey(currentPlusByte))
                 {
-                    int count = reader.ReadInt32();
-                    codigos = ReadCodigos(reader, count);
+                    current = currentPlusByte;
                 }
-
-                Dictionary<int, string> dicionario = InicializarDicionarioInverso();
-                List<byte> outputBytes = new List<byte>();
-                string sequenciaAtual = dicionario[codigos[0]];
-                outputBytes.AddRange(sequenciaAtual.Select(c => (byte)c));
-
-                for (int i = 1; i < codigos.Count; i++)
+                else
                 {
-                    int codigo = codigos[i];
-                    string entrada;
-                    if (dicionario.ContainsKey(codigo))
+                    compressedData.Add(dictionary[current]);
+                    dictionary[currentPlusByte] = nextCode++;
+                    current = ((char)b).ToString();
+                }
+            }
+
+            if (!string.IsNullOrEmpty(current))
+            {
+                compressedData.Add(dictionary[current]);
+            }
+
+            return compressedData;
+        }
+
+        private List<int> ReadCompressedData(string inputPath)
+        {
+            List<int> compressedData = new List<int>();
+            using (var inputStream = new FileStream(inputPath, FileMode.Open))
+            using (var reader = new BinaryReader(inputStream))
+            {
+                while (inputStream.Position < inputStream.Length)
+                {
+                    compressedData.Add(reader.ReadInt32());
+                }
+            }
+            return compressedData;
+        }
+
+        private Dictionary<int, string> InitializeReverseDictionary()
+        {
+            var dictionary = new Dictionary<int, string>();
+            for (int i = 0; i < 256; i++)
+            {
+                dictionary[i] = ((char)i).ToString();
+            }
+            return dictionary;
+        }
+
+        private byte[] DecompressData(List<int> compressedData, Dictionary<int, string> dictionary)
+        {
+            using (var outputStream = new MemoryStream())
+            {
+                int nextCode = 256;
+                string current = compressedData.Count > 0 ? dictionary[compressedData[0]] : "";
+                byte[] currentBytes = StringToByteArray(current);
+                outputStream.Write(currentBytes, 0, currentBytes.Length);
+
+                foreach (int code in compressedData.Skip(1))
+                {
+                    string entry;
+                    if (dictionary.ContainsKey(code))
                     {
-                        entrada = dicionario[codigo];
+                        entry = dictionary[code];
+                    }
+                    else if (code == nextCode)
+                    {
+                        entry = current + current[0];
                     }
                     else
                     {
-                        entrada = sequenciaAtual + sequenciaAtual[0];
+                        throw new InvalidDataException("Código inválido encontrado durante a descompressão.");
                     }
 
-                    outputBytes.AddRange(entrada.Select(c => (byte)c));
-                    if (dicionario.Count < MaxCodigo)
-                    {
-                        dicionario.Add(dicionario.Count, sequenciaAtual + entrada[0]);
-                    }
-                    sequenciaAtual = entrada;
+                    byte[] entryBytes = StringToByteArray(entry);
+                    outputStream.Write(entryBytes, 0, entryBytes.Length);
+
+                    dictionary[nextCode++] = current + entry[0];
+                    current = entry;
                 }
 
-                File.WriteAllBytes(outputPath, outputBytes.ToArray());
-                Console.WriteLine($"Arquivo descomprimido com LZW: {inputPath} -> {outputPath}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Erro ao descomprimir com LZW ({inputPath}): {ex.Message}");
-                throw;
+                return outputStream.ToArray();
             }
         }
 
-        private Dictionary<string, int> InicializarDicionario()
+        private byte[] StringToByteArray(string str)
         {
-            var dicionario = new Dictionary<string, int>();
-            for (int i = 0; i < 256; i++)
+            byte[] bytes = new byte[str.Length];
+            for (int i = 0; i < str.Length; i++)
             {
-                dicionario.Add(((char)i).ToString(), i);
+                bytes[i] = (byte)str[i];
             }
-            return dicionario;
-        }
-
-        private Dictionary<int, string> InicializarDicionarioInverso()
-        {
-            var dicionario = new Dictionary<int, string>();
-            for (int i = 0; i < 256; i++)
-            {
-                dicionario.Add(i, ((char)i).ToString());
-            }
-            return dicionario;
-        }
-
-        private void WriteCodigos(List<int> codigos, BinaryWriter writer)
-        {
-            byte[] buffer = new byte[codigos.Count * 2];
-            int index = 0;
-            foreach (int codigo in codigos)
-            {
-                buffer[index++] = (byte)(codigo >> 4);
-                buffer[index++] = (byte)(codigo & 0xFF);
-            }
-            writer.Write(buffer);
-        }
-
-        private List<int> ReadCodigos(BinaryReader reader, int count)
-        {
-            List<int> codigos = new List<int>();
-            byte[] buffer = reader.ReadBytes(count * 2);
-            for (int i = 0; i < buffer.Length; i += 2)
-            {
-                int codigo = (buffer[i] << 4) | buffer[i + 1];
-                codigos.Add(codigo);
-            }
-            return codigos;
+            return bytes;
         }
     }
 }

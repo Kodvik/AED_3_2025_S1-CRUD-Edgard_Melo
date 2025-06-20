@@ -1,22 +1,20 @@
-﻿using System.Text;
+﻿// Notas de Desenvolvimento:
+// - Substituí a serialização com ToString() por JsonSerializer, que já funciona no CRUD.
+// - Isso resolve o problema de dados inválidos ao serializar RegistroDeRede.
+// - Mantive a genericidade para suportar outras entidades no futuro.
 using AED_3_2025_S1_CRUD_Edgard_Melo.Models;
+
 public class SerializadorEntidade<T> where T : IEntidade, new()
 {
     public byte[] Serializar(T entidade)
     {
-        // Serialização simples (pode ser adaptada)
-        string serializado = $"{entidade.UID},{entidade.ToString()}";
-        return Encoding.UTF8.GetBytes(serializado);
+        // Usando JsonSerializer para uma serialização robusta e padrão
+        return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(entidade);
     }
 
     public T Desserializar(byte[] dados)
     {
-        string serializado = Encoding.UTF8.GetString(dados);
-        string[] campos = serializado.Split(',');
-
-        T entidade = new T();
-        entidade.UID = int.Parse(campos[0]);
-        // Desserializar outros campos aqui
-        return entidade;
+        // Desserialização direta com JsonSerializer, assumindo que os dados estão bem formados
+        return System.Text.Json.JsonSerializer.Deserialize<T>(dados);
     }
 }

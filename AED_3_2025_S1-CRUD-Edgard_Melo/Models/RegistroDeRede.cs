@@ -3,7 +3,7 @@
     public class RegistroDeRede : IEntidade
     {
         public int UID { get; set; } // Mapeia "UID"
-        public DateTime? Timestamp { get; set; } // Mapeia "Timestamp"
+        public DateTime Timestamp { get; set; } // Mapeia "Timestamp"
         public string? SourceIPAddress { get; set; } // Mapeia "Source IP Address"
         public string? DestinationIPAddress { get; set; } // Mapeia "Destination IP Address"
         public int? SourcePort { get; set; } // Mapeia "Source Port"
